@@ -10,7 +10,6 @@ RUN \
 
 # fix certificate problem (avoid con reset by peer)
 RUN \
-  apk update && \
   apk add ca-certificates wget && \
   update-ca-certificates
 
