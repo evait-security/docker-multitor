@@ -8,6 +8,11 @@ RUN \
   apk update && apk add --no-cache $BUILD_PACKAGES $PACKAGES && \
   npm install -g http-proxy-to-socks
 
+# fix certificate problem (avoid con reset by peer)
+RUN \
+  apk add ca-certificates wget && \
+  update-ca-certificates
+
 # install polipo
 RUN \
 	wget https://github.com/jech/polipo/archive/master.zip -O polipo.zip && \
