@@ -12,9 +12,12 @@ docker build -t multitor .
 # Quick Start
 
 ```bash
-By default, the container runs with 5 Tor instances, HAProxy (frontend) and Privoxy (broker), which implicate the load balancer. The proxy is set up with port 16379 and the container will be removed after use.
+#By default, the container runs with 5 Tor instances by default, HAProxy (frontend) and Privoxy (broker), which implicate the load balancer. The proxy is set up with port 16379 and the container will be removed after use.
 
 docker run --rm -p 16379:16379 evait/multitor
+
+# Start 20 tor instances
+docker run --rm -e "TOR_INSTANCES=20" -p 16379:16379 evait/multitor 
 ```
 
 # Advance
