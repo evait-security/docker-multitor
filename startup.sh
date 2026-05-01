@@ -1,17 +1,15 @@
 #!/bin/bash
+set -e
 
-if [[ -z "${TOR_INSTANCES}" ]]; then
-  TOR_INSTANCE_COUNT=5
-  echo "Environment variable TOR_INSTANCES not specified, defaulting to 5"
-else
-  TOR_INSTANCE_COUNT="${TOR_INSTANCES}"
-fi
+TOR_INSTANCES=${TOR_INSTANCES:-5}
+[[ "$TOR_INSTANCES" =~ ^[0-9]+$ ]] || TOR_INSTANCES=5
 
-re='^[0-9]+$'
-if ! [[ $TOR_INSTANCE_COUNT =~ $re ]] ; then
-   echo "error: TOR_INSTANCES is not a number, defaulting to 5"
-   TOR_INSTANCE_COUNT=5
-fi
+echo "[*] Starting multitor with $TOR_INSTANCES instances"
 
+multitor --init "$TOR_INSTANCES" --user root --socks-port 9000 --control-port 9900 \
+  --proxy privoxy --haproxy --verbose
 
-multitor --init $TOR_INSTANCE_COUNT --user root --socks-port 9000 --control-port 9900 --proxy privoxy --haproxy --verbose --debug > /tmp/multitor.log; tail -f /tmp/multitor.log
+# Keep container alive while haproxy runs
+while pidof haproxy > /dev/null; do
+  sleep 5
+done

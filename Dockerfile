@@ -1,48 +1,21 @@
-FROM alpine:latest
+FROM alpine:3.21
 
-ENV BUILD_PACKAGES="build-base openssl" \
-    PACKAGES="tor sudo bash git haproxy privoxy npm procps"
+RUN apk add --no-cache \
+      tor bash git haproxy privoxy procps curl netcat-openbsd sudo \
+    && cd /etc/privoxy && for f in *.new; do mv "$f" "${f%.new}"; done \
+    && git clone https://github.com/trimstray/multitor /opt/multitor \
+    && cd /opt/multitor && chmod +x setup.sh bin/multitor && ./setup.sh install \
+    && sed -i 's/127.0.0.1:16379/0.0.0.0:16379/g' /opt/multitor/templates/haproxy-template.cfg \
+    && sed -i 's/polipo privoxy hpts/privoxy/' /opt/multitor/src/__init__ \
+    && mkdir -p /var/log/multitor/privoxy \
+    && rm -rf /opt/multitor/.git
 
-# install requirements
-RUN \
-  apk update && apk add --no-cache $BUILD_PACKAGES $PACKAGES && \
-  npm install -g http-proxy-to-socks
+COPY startup.sh /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh
 
-# fix certificate problem (avoid con reset by peer)
-RUN \
-  apk add ca-certificates wget && \
-  update-ca-certificates
+EXPOSE 16379
 
-# install polipo
-RUN \
-	wget https://github.com/jech/polipo/archive/master.zip -O polipo.zip && \
-	unzip polipo.zip && \
-  cd polipo-master && \
-  make && \
-  install polipo /usr/local/bin/ && \
-  cd .. && \
-  rm -rf polipo.zip polipo-master && \
-  mkdir -p /usr/share/polipo/www /var/cache/polipo 
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -sf --proxy http://127.0.0.1:16379 https://check.torproject.org/api/ip || exit 1
 
-# clean build packages
-RUN \
-  apk del $BUILD_PACKAGES
-
-# install multitor
-RUN	git clone https://github.com/trimstray/multitor && \
-	cd multitor && \
-	./setup.sh install && \
-# create log folders
-  mkdir -p /var/log/multitor/privoxy/ && \
-  mkdir -p /var/log/polipo/ && \
-# let haproxy listen from outside, instand only in the docker container
-  sed -i s/127.0.0.1:16379/0.0.0.0:16379/g templates/haproxy-template.cfg
-
-COPY startup.sh /multitor/
-RUN chmod +x /multitor/startup.sh
-
-WORKDIR /multitor/
-EXPOSE	16379
-
-#CMD multitor --init 5 --user root --socks-port 9000 --control-port 9900 --proxy privoxy --haproxy --verbose --debug > /tmp/multitor.log; tail -f /tmp/multitor.log
-CMD ["./startup.sh"]
+ENTRYPOINT ["startup.sh"]
