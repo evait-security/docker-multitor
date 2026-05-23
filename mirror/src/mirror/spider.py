@@ -48,11 +48,14 @@ def fetch_page(url: str, proxy: str, timeout: int = 120) -> str | None:
                 url,
             ],
             capture_output=True,
-            text=True,
             timeout=timeout + 30,
         )
         if result.returncode == 0:
-            return result.stdout
+            # Try UTF-8 first, fall back to latin-1 (never fails)
+            try:
+                return result.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                return result.stdout.decode("latin-1")
         log.warning(f"wget failed for {url}: exit {result.returncode}")
         return None
     except subprocess.TimeoutExpired:
