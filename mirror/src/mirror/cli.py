@@ -87,117 +87,166 @@ Examples:
     queue = Queue(db_path)
     display = Display(queue, parallel)
 
-    # Outer retry loop
-    while True:
-        # Phase 1: Spider (discover files)
-        display.render_spider("Crawling directory listings...")
-        try:
-            added = spider(queue, url, proxy, args.timeout)
-        except KeyboardInterrupt:
-            print("\n[!] Interrupted during crawl.")
-            queue.close()
-            sys.exit(1)
-
-        stats = queue.stats()
-        if stats["total"] == 0:
-            display.render_spider("No files found. Retrying in 10s...")
-            time.sleep(10)
-            continue
-
-        # Requeue any failed/stale jobs for retry
-        requeued = queue.requeue_failed()
-        stale = queue.requeue_stale()
+    # Requeue any failed/stale jobs from previous run
+    requeued = queue.requeue_failed()
+    stale = queue.requeue_stale()
+    if requeued or stale:
         log.info(f"Requeued: {requeued} failed, {stale} stale")
 
-        if not queue.has_work():
-            display.render_final()
-            break
+    # --- Run spider + workers concurrently ---
+    stop_event = threading.Event()
+    spider_done = threading.Event()
+    display.start_time = time.time()
 
-        # Phase 2: Download workers
-        stop_event = threading.Event()
-        display.start_time = time.time()
-
-        worker_queues = []
-        threads = []
-        for i in range(parallel):
-            wq = Queue(db_path)
-            worker_queues.append(wq)
-
-            def run_worker(wid, wqueue):
-                while not stop_event.is_set():
-                    job = wqueue.claim_job(wid)
-                    if job is None:
-                        # Check if there's still pending work
-                        if not wqueue.has_work():
-                            break
-                        time.sleep(1)
-                        continue
-
-                    file_id, file_url, rel_path = job
-                    display.set_worker_status(wid, rel_path)
-                    log.info(f"W{wid} downloading: {rel_path}")
-
-                    dest_path = dest / rel_path
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    from .worker import download_file
-                    success, error = download_file(file_url, dest_path, proxy, args.timeout)
-
-                    if success:
-                        size = dest_path.stat().st_size if dest_path.exists() else 0
-                        wqueue.mark_done(file_id, size)
-                        display.add_bytes(size)
-                        display.set_worker_status(wid, "idle")
-                        log.info(f"W{wid} done: {rel_path} ({size} bytes)")
-                    else:
-                        wqueue.mark_failed(file_id, error)
-                        display.set_worker_status(wid, f"FAILED: {rel_path}")
-                        log.warning(f"W{wid} failed: {rel_path} - {error}")
-
-                display.set_worker_status(wid, "idle")
-
-            t = threading.Thread(target=run_worker, args=(i, wq), daemon=True)
-            t.start()
-            threads.append(t)
-
-        # Monitor loop with display updates
+    # Spider thread
+    def run_spider():
         try:
-            while any(t.is_alive() for t in threads):
-                display.render()
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n\n[!] Interrupted. Stopping workers...")
-            stop_event.set()
-            for t in threads:
-                t.join(timeout=5)
-            for wq in worker_queues:
-                wq.close()
-            # Show final state
-            stats = queue.stats()
-            print(f"    Saved state: {stats['done']} done, {stats['pending']+stats['downloading']} remaining")
-            print(f"    Run again to resume.")
-            queue.close()
-            sys.exit(1)
+            spider_queue = Queue(db_path)
+            spider(spider_queue, url, proxy, args.timeout,
+                   status_callback=lambda msg: setattr(display, 'spider_status', msg))
+            spider_queue.close()
+        except Exception as e:
+            log.error(f"Spider error: {e}")
+        finally:
+            display.spider_status = "done ✓"
+            spider_done.set()
 
-        # Clean up worker connections
-        for wq in worker_queues:
-            wq.close()
+    spider_thread = threading.Thread(target=run_spider, daemon=True)
+    spider_thread.start()
 
-        display.render()
-        print()
+    # Wait briefly for spider to find first files
+    time.sleep(2)
 
-        # Check results
+    # Worker threads
+    worker_queues = []
+    worker_threads = []
+    for i in range(parallel):
+
+        def run_worker(wid):
+            # Each worker creates its own DB connection in its own thread
+            wqueue = Queue(db_path)
+            worker_queues.append(wqueue)
+            idle_count = 0
+            while not stop_event.is_set():
+                job = wqueue.claim_job(wid)
+                if job is None:
+                    idle_count += 1
+                    # If spider is done and no more work, exit
+                    if spider_done.is_set() and not wqueue.has_work():
+                        break
+                    # Be patient while spider is still running
+                    if idle_count > 30 and spider_done.is_set():
+                        break
+                    time.sleep(1)
+                    continue
+
+                idle_count = 0
+                file_id, file_url, rel_path = job
+                display.set_worker_status(wid, rel_path)
+                log.info(f"W{wid} downloading: {rel_path}")
+
+                dest_path = dest / rel_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+                from .worker import download_file
+                success, error = download_file(file_url, dest_path, proxy, args.timeout)
+
+                if success:
+                    size = dest_path.stat().st_size if dest_path.exists() else 0
+                    wqueue.mark_done(file_id, size)
+                    display.add_bytes(size)
+                    display.set_worker_status(wid, "idle")
+                    log.info(f"W{wid} done: {rel_path} ({size} bytes)")
+                else:
+                    wqueue.mark_failed(file_id, error)
+                    display.set_worker_status(wid, f"FAILED: {rel_path}")
+                    log.warning(f"W{wid} failed: {rel_path} - {error}")
+
+            display.set_worker_status(wid, "done")
+            wqueue.close()
+
+        t = threading.Thread(target=run_worker, args=(i,), daemon=True)
+        t.start()
+        worker_threads.append(t)
+
+    # Monitor loop with display updates
+    try:
+        while spider_thread.is_alive() or any(t.is_alive() for t in worker_threads):
+            display.render()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n\n[!] Interrupted. Stopping...")
+        stop_event.set()
+        spider_thread.join(timeout=5)
+        for t in worker_threads:
+            t.join(timeout=5)
         stats = queue.stats()
-        if stats["failed"] == 0 and stats["pending"] == 0 and stats["downloading"] == 0:
-            display.render_final()
-            break
+        print(f"    Saved state: {stats['done']} done, {stats['pending']+stats['downloading']} remaining")
+        print(f"    Run again to resume.")
+        queue.close()
+        sys.exit(1)
 
-        if stats["failed"] > 0:
-            log.info(f"{stats['failed']} file(s) failed. Retrying...")
-            print(f"\n[!] {stats['failed']} file(s) failed. Retrying in 10s...")
+    display.render()
+    print()
+
+    # Check results — retry loop for failed files
+    stats = queue.stats()
+    if stats["failed"] > 0:
+        log.info(f"{stats['failed']} file(s) failed. Starting retry cycle...")
+        print(f"\n[!] {stats['failed']} file(s) failed. Retrying...")
+
+        while stats["failed"] > 0:
+            queue.requeue_failed()
+            time.sleep(5)
+
+            retry_threads = []
+            for i in range(parallel):
+
+                def retry_worker(wid):
+                    wqueue = Queue(db_path)
+                    while not stop_event.is_set():
+                        job = wqueue.claim_job(wid)
+                        if job is None:
+                            if not wqueue.has_work():
+                                break
+                            time.sleep(1)
+                            continue
+                        file_id, file_url, rel_path = job
+                        display.set_worker_status(wid, rel_path)
+                        dest_path = dest / rel_path
+                        dest_path.parent.mkdir(parents=True, exist_ok=True)
+                        from .worker import download_file
+                        success, error = download_file(file_url, dest_path, proxy, args.timeout)
+                        if success:
+                            size = dest_path.stat().st_size if dest_path.exists() else 0
+                            wqueue.mark_done(file_id, size)
+                            display.add_bytes(size)
+                            display.set_worker_status(wid, "idle")
+                        else:
+                            wqueue.mark_failed(file_id, error)
+                            display.set_worker_status(wid, f"RETRY FAILED: {rel_path}")
+                    display.set_worker_status(wid, "done")
+                    wqueue.close()
+
+                t = threading.Thread(target=retry_worker, args=(i,), daemon=True)
+                t.start()
+                retry_threads.append(t)
+
+            try:
+                while any(t.is_alive() for t in retry_threads):
+                    display.render()
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                stop_event.set()
+                break
+
+            stats = queue.stats()
+            if stats["failed"] == 0:
+                break
+            print(f"\n[!] Still {stats['failed']} failed. Retrying in 10s...")
             time.sleep(10)
-            # Loop continues — failed jobs get requeued at top
 
+    display.render_final()
     queue.close()
 
 

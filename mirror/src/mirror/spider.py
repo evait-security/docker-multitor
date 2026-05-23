@@ -116,12 +116,17 @@ def extract_links(html: str, base_url: str) -> tuple[list[str], list[str]]:
     return files, dirs
 
 
-def spider(queue: Queue, base_url: str, proxy: str, timeout: int = 120):
+def spider(queue: Queue, base_url: str, proxy: str, timeout: int = 120, status_callback=None):
     """Crawl directory listings starting from base_url, adding files to queue.
     
     Runs continuously until all directories are explored.
     Retries on failure indefinitely.
+    status_callback: optional callable(str) to report current spider status.
     """
+    def report(msg):
+        if status_callback:
+            status_callback(msg)
+
     # Ensure base URL ends with /
     if not base_url.endswith("/"):
         base_url += "/"
@@ -135,6 +140,10 @@ def spider(queue: Queue, base_url: str, proxy: str, timeout: int = 120):
 
         if url in visited:
             continue
+
+        # Show which directory we're crawling
+        rel = url[len(base_url):]
+        report(f"/{rel} ({len(to_visit)} dirs queued, {total_added} files found)")
 
         log.info(f"Crawling: {url}")
         html = None
@@ -168,5 +177,6 @@ def spider(queue: Queue, base_url: str, proxy: str, timeout: int = 120):
 
         log.info(f"  Found {len(files)} file(s), {len(dirs)} subdir(s). Total queued: {total_added}")
 
+    report(f"done ({total_added} files, {len(visited)} dirs crawled)")
     log.info(f"Spider complete. {total_added} new file(s) added to queue. {len(visited)} directories crawled.")
     return total_added

@@ -16,6 +16,7 @@ class Display:
         self.worker_status: dict[int, str] = {}
         self.last_done = 0
         self.bytes_total = 0
+        self.spider_status = "starting..."
         self._lines_printed = 0
 
     def set_worker_status(self, worker_id: int, status: str):
@@ -95,6 +96,9 @@ class Display:
             f"\033[33m◌ Pending: {stats['pending']}\033[0m │ "
             f"\033[31m✗ Failed: {stats['failed']}\033[0m"
         )
+
+        # Spider status
+        lines.append(f"  \033[33m⟳\033[0m Spider: {self.spider_status}")
 
         # Worker status
         lines.append("")
