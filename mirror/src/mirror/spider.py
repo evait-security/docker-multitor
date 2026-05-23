@@ -7,7 +7,7 @@ import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, unquote
 
-from .queue import Queue
+from .queue import MirrorQueue
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def extract_links(html: str, base_url: str) -> tuple[list[str], list[str]]:
     return files, dirs
 
 
-def spider(queue: Queue, base_url: str, proxy: str, timeout: int = 120, status_callback=None):
+def spider(queue: MirrorQueue, base_url: str, proxy: str, timeout: int = 120, status_callback=None):
     """Crawl directory listings starting from base_url, adding files to queue.
     
     Runs continuously until all directories are explored.

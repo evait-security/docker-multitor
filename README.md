@@ -55,6 +55,9 @@ uv tool install ./mirror
 
 # Or run directly from repo
 uv run --directory mirror mirror --help
+
+# or install it from the online repo
+uv tool install git+https://github.com/evait-security/docker-multitor/tree/master/mirror
 ```
 
 ### usage

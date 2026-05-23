@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .queue import Queue, Status
+from .queue import MirrorQueue, Status
 
 log = logging.getLogger(__name__)
 
@@ -56,22 +56,13 @@ def download_file(
 
 def worker(
     worker_id: int,
-    queue: Queue,
+    queue: MirrorQueue,
     dest: Path,
     proxy: str,
     timeout: int = 120,
     stop_event=None,
 ):
-    """Worker loop: claim jobs from queue and download until no work remains.
-    
-    Args:
-        worker_id: Identifier for this worker
-        queue: The job queue
-        dest: Base destination directory
-        proxy: Proxy URL
-        timeout: Download timeout in seconds
-        stop_event: threading.Event to signal shutdown
-    """
+    """Worker loop: get jobs from queue and download until no work remains."""
     log.info(f"Worker {worker_id} started")
     idle_count = 0
 
@@ -79,14 +70,12 @@ def worker(
         if stop_event and stop_event.is_set():
             break
 
-        job = queue.claim_job(worker_id)
+        job = queue.get_job(timeout=1.0)
 
         if job is None:
             idle_count += 1
             if idle_count > 10:
-                # No work for a while, check if we should stop
                 break
-            time.sleep(1)
             continue
 
         idle_count = 0
@@ -98,11 +87,11 @@ def worker(
         success, error = download_file(url, dest_path, proxy, timeout)
 
         if success:
-            size = dest_path.stat().st_size if dest_path.exists() else None
-            queue.mark_done(file_id, size)
-            log.info(f"[W{worker_id}] Done: {rel_path} ({size or 0} bytes)")
+            size = dest_path.stat().st_size if dest_path.exists() else 0
+            queue.complete(file_id, size)
+            log.info(f"[W{worker_id}] Done: {rel_path} ({size} bytes)")
         else:
-            queue.mark_failed(file_id, error)
+            queue.fail(file_id, error)
             log.warning(f"[W{worker_id}] Failed: {rel_path} - {error}")
 
     log.info(f"Worker {worker_id} stopped")

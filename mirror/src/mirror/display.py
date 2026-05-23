@@ -3,13 +3,13 @@
 import os
 import shutil
 import time
-from .queue import Queue, Status
+from .queue import MirrorQueue, Status
 
 
 class Display:
     """Real-time terminal progress display."""
 
-    def __init__(self, queue: Queue, num_workers: int):
+    def __init__(self, queue: MirrorQueue, num_workers: int):
         self.queue = queue
         self.num_workers = num_workers
         self.start_time = time.time()
