@@ -1,0 +1,16 @@
+[project]
+name = "mirror"
+version = "1.0.0"
+description = "Robust parallel Tor mirror tool using docker-multitor proxy"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+mirror = "mirror.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mirror"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

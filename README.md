@@ -35,45 +35,68 @@ docker run --rm -p 16379:16379 evait/multitor
 
 ## mirror
 
-Mirror/download directory-listed URLs over the Tor network with automatic retry on failure. Designed for robust bulk downloads from `.onion` sites (e.g. analyzing leaked data for DSGVO notification obligations).
+Robust parallel Tor mirror tool for downloading directory-listed URLs from `.onion` sites. Built for bulk-downloading leaked datasets for DSGVO analysis (informing affected users about stolen data).
+
+**Architecture:** Python + SQLite job queue + parallel wget workers. Spider crawls directory listings, workers download files concurrently through multiple Tor circuits.
+
+- SQLite database tracks all files — crash-safe, resumable
+- Parallel download workers (one per Tor circuit)
+- Real-time terminal UI showing progress, speed, and worker status
+- Automatic infinite retry on network failure
+- Resume support — re-run the same command to pick up where you left off
+
+### install
+
+Requires [uv](https://docs.astral.sh/uv/) and `wget`.
 
 ```bash
-./mirror.sh <url> [destination]
+# Install as global tool
+uv tool install ./mirror
+
+# Or run directly from repo
+uv run --directory mirror mirror --help
 ```
 
-**Parameters:**
-
-| parameter | required | description |
-|-----------|----------|-------------|
-| `url` | yes | URL to mirror (`.onion` or clearnet via Tor) |
-| `destination` | no | Local directory to save files (default: current directory) |
-
-**Examples:**
+### usage
 
 ```bash
-# Mirror a .onion directory listing to current directory
-./mirror.sh http://exampleonion.onion/files/
+# Start multitor proxy
+docker run --rm -d -p 16379:16379 -e TOR_INSTANCES=5 evait/multitor
 
-# Mirror to a specific destination
-./mirror.sh http://exampleonion.onion/dump/ /data/leak-mirror
+# Mirror a .onion directory listing
+mirror http://exampleonion.onion/files/
 
-# Use a custom proxy address
-MULTITOR_PROXY=http://10.0.0.5:16379 ./mirror.sh http://exampleonion.onion/files/ /data/output
+# Mirror to a specific destination with 10 workers
+mirror --parallel 10 http://exampleonion.onion/dump/ /data/leak-mirror
+
+# Custom proxy address
+mirror --proxy http://10.0.0.5:16379 http://exampleonion.onion/files/
+
+# Resume an interrupted download (just re-run the same command)
+mirror http://exampleonion.onion/dump/ /data/leak-mirror
+
+# Start fresh, ignoring previous state
+mirror --fresh http://exampleonion.onion/dump/ /data/leak-mirror
 ```
 
-**Features:**
+### options
 
-- Uses the docker-multitor HAProxy endpoint as HTTP proxy (default `http://127.0.0.1:16379`)
-- Recursive mirror with `wget --mirror` preserving directory structure
-- Infinite retry on network failure or connection loss — resumes where it left off
-- Respects timestamps to avoid re-downloading unchanged files
-- Random wait between requests to reduce load / avoid detection
-- Configurable via `MULTITOR_PROXY` environment variable
+| flag | default | description |
+|------|---------|-------------|
+| `url` | — | URL to mirror (directory listing with links) |
+| `destination` | `.` | Local directory to save files |
+| `-p, --parallel` | `5` | Number of parallel download workers |
+| `--proxy` | `http://127.0.0.1:16379` | Multitor proxy address |
+| `--timeout` | `120` | Download timeout per file (seconds) |
+| `--fresh` | — | Delete existing database, start over |
+| `-v, --verbose` | — | Write detailed logs to `mirror.log` |
 
-**Requirements:**
+### how it works
 
-- `wget` installed on the host
-- docker-multitor container running and reachable
+1. **Spider** crawls directory listings recursively via the Tor proxy, discovers all file URLs, stores them in a SQLite queue (`.mirror.db` in the destination)
+2. **Workers** (N parallel threads) pull jobs from the queue and download files using `wget` through the HAProxy round-robin — each request exits through a different Tor circuit
+3. **Retry loop** — failed downloads are requeued and retried indefinitely until all files are saved
+4. **Resume** — the database persists in the destination dir; re-running detects it and picks up where it left off
 
 ## test
 
