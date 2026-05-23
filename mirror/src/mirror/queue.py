@@ -1,7 +1,7 @@
 """Thread-safe job queue backed by SQLite for persistence.
 
 All SQLite access is funneled through a single writer thread.
-Workers and spider communicate via stdlib queue.Queue — zero contention.
+Workers and spider communicate via stdlib queue.Queue - zero contention.
 """
 
 import logging
@@ -64,7 +64,7 @@ class MirrorQueue:
         self._known_urls: set[str] = set()
         self._known_lock = threading.Lock()
 
-        # Stats — updated only by writer thread, read with lock
+        # Stats - updated only by writer thread, read with lock
         self._stats_lock = threading.Lock()
         self._stats = {s.value: 0 for s in Status}
         self._stats["total"] = 0

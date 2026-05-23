@@ -116,7 +116,7 @@ Examples:
         spider_thread = None
         spider_done.set()
         display.spider_status = "skipped (resuming, use --rescan to re-crawl)"
-        log.info("Spider skipped — resuming with existing queue")
+        log.info("Spider skipped - resuming with existing queue")
 
     # --- Worker threads ---
     stop_event = threading.Event()

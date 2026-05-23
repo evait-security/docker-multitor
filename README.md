@@ -39,11 +39,11 @@ Robust parallel Tor mirror tool for downloading directory-listed URLs from `.oni
 
 **Architecture:** Python + SQLite job queue + parallel wget workers. Spider crawls directory listings, workers download files concurrently through multiple Tor circuits.
 
-- SQLite database tracks all files — crash-safe, resumable
+- SQLite database tracks all files - crash-safe, resumable
 - Parallel download workers (one per Tor circuit)
 - Real-time terminal UI showing progress, speed, and worker status
 - Automatic infinite retry on network failure
-- Resume support — re-run the same command to pick up where you left off
+- Resume support - re-run the same command to pick up where you left off
 
 ### install
 
@@ -86,20 +86,20 @@ mirror --fresh http://exampleonion.onion/dump/ /data/leak-mirror
 
 | flag | default | description |
 |------|---------|-------------|
-| `url` | — | URL to mirror (directory listing with links) |
+| `url` | - | URL to mirror (directory listing with links) |
 | `destination` | `.` | Local directory to save files |
 | `-p, --parallel` | `5` | Number of parallel download workers |
 | `--proxy` | `http://127.0.0.1:16379` | Multitor proxy address |
 | `--timeout` | `120` | Download timeout per file (seconds) |
-| `--fresh` | — | Delete existing database, start over |
-| `-v, --verbose` | — | Write detailed logs to `mirror.log` |
+| `--fresh` | - | Delete existing database, start over |
+| `-v, --verbose` | - | Write detailed logs to `mirror.log` |
 
 ### how it works
 
 1. **Spider** crawls directory listings recursively via the Tor proxy, discovers all file URLs, stores them in a SQLite queue (`.mirror.db` in the destination)
-2. **Workers** (N parallel threads) pull jobs from the queue and download files using `wget` through the HAProxy round-robin — each request exits through a different Tor circuit
-3. **Retry loop** — failed downloads are requeued and retried indefinitely until all files are saved
-4. **Resume** — the database persists in the destination dir; re-running detects it and picks up where it left off
+2. **Workers** (N parallel threads) pull jobs from the queue and download files using `wget` through the HAProxy round-robin - each request exits through a different Tor circuit
+3. **Retry loop** - failed downloads are requeued and retried indefinitely until all files are saved
+4. **Resume** - the database persists in the destination dir; re-running detects it and picks up where it left off
 
 ## test
 
